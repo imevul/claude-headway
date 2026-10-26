@@ -55,17 +55,22 @@ function fakeFs(on: On, files: Record<string, string>) {
   return { touch: () => version++ }
 }
 
-function engine(on: On, files: Record<string, string>) {
+function engine(on: On, files: Record<string, string>, place: { root?: string } = {}) {
   mock.store(on)
-  mock.clock(on)
+  const clock = mock.clock(on)
+  on('session.root', () => {
+    if (!place.root) throw new Error('no root')
+    return { value: place.root }
+  })
   on('session.repo', () => ({ value: { root: '/proj', name: 'proj', remote: null, internal: false } }))
   on('session.id', () => ({ value: 'me-1234567' }))
   on('command.register', () => ({ value: { command: 'headway' } }))
   on('tool.register', () => ({ value: { tool: 'mcp__headway__focus' } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.toast', () => ({ value: undefined }) as never)
   on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '' } }) as never)
   on('session.start', (_, e) => ({ cwd: e.cwd }))
-  return fakeFs(on, files)
+  return { ...fakeFs(on, files), clock }
 }
 
 test('the pane opens the branch in progress and toggles rows, on terminal and desktop', async ($, on) => {
@@ -159,4 +164,34 @@ test('/headway band off hides the progress bar', async ($, on) => {
   expect(await ui.find({ type: 'Svg' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /engine band/ })).toBeDefined()
   await ui.unmount()
+})
+
+test('a session that moves into the project after it starts finds the roadmap', async ($, on) => {
+  const place = { root: '/home/me' }
+  engine(on, { '/proj/ROADMAP.md': ROADMAP }, place)
+  await $.session.start({ cwd: '/home/me', surface: 'desktop', isInteractive: true })
+  const before = await $.command.run({ command: 'headway', args: 'where' } as never)
+  expect(String((before as { text?: unknown }).text)).toMatch(/No roadmap file found/)
+
+  place.root = '/proj'
+  const after = await $.command.run({ command: 'headway', args: 'where' } as never)
+  expect(String((after as { text?: unknown }).text)).toMatch(/Roadmap: \/proj\/ROADMAP\.md/)
+  expect(String((after as { text?: unknown }).text)).toMatch(/ROADMAP\.md: found/)
+})
+
+test('/headway init puts the prompt in the prompt box when no turn starts', async ($, on) => {
+  const { clock } = engine(on, {})
+  const filled: string[] = []
+  on('prompt.submit', () => ({ drop: 'host does not run plugin prompts' }) as never)
+  on('prompt.fill', (_, e) => {
+    filled.push(e.text)
+    return { isFilled: true }
+  })
+  await $.session.start({ cwd: '/proj', surface: 'desktop', isInteractive: true })
+  const out = await $.command.run({ command: 'headway', args: 'init' } as never)
+  expect(String((out as { text?: unknown }).text)).toMatch(/draft ROADMAP\.md/)
+  expect(filled).toEqual([])
+  await clock.advance(5000)
+  expect(filled.length).toBe(1)
+  expect(filled[0]).toMatch(/Draft a roadmap for this project in `ROADMAP\.md`/)
 })

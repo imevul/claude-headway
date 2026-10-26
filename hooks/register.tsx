@@ -14,6 +14,7 @@ const TICK_MS = 2000
 const DISCOVER_MS = 30_000
 const STALE_MS = 10 * 60_000
 const GONE_MS = 24 * 60 * 60_000
+const INIT_WAIT_MS = 4000
 const DEFAULT_PATHS = 'ROADMAP.md, docs/ROADMAP.md, docs/internal/ROADMAP.md'
 
 const model = atom({ plugin: 'headway', key: 'model' } as const, null)
@@ -79,11 +80,16 @@ let bodyRows = 30
 let self: SessionInfo = { sessionId: '', title: '', state: 'idle', updatedAt: 0 }
 let planSteps: { content: string; status: string }[] = []
 let ticking = false
+let initPending = false
+let lookups: string[] = []
 let showBand = true
+
+const errText = (err: unknown) => (err instanceof Error ? err.message : String(err)).slice(0, 120)
 
 /** A roadmap path from config or discovery: relative to the project root, or absolute. */
 function abs(p: string) {
-  return p.startsWith('/') ? p : join(root, p)
+  if (p.startsWith('/')) return p
+  return p === '.' ? root : join(root, p)
 }
 
 function sessionsDir() {
@@ -99,16 +105,28 @@ async function discover($: Engine) {
   } catch {
     // No project override.
   }
+  lookups = []
   for (const p of searchPaths) {
+    // The exact name first; then the folder's listing, for another spelling of the name.
     try {
-      const entries = await $.fs.list(join(root, dirOf(p)) || '/')
+      if (await $.fs.exists(abs(p))) {
+        if (!found.includes(p)) found.push(p)
+        lookups.push(`${p}: found`)
+        continue
+      }
+    } catch (err) {
+      lookups.push(`${p}: exists failed (${errText(err)})`)
+    }
+    try {
+      const entries = await $.fs.list(abs(dirOf(p) || '.'))
       const hit = entries.find(en => en.kind !== 'dir' && en.name.toLowerCase() === baseOf(p).toLowerCase())
       if (hit) {
         const rel = join(dirOf(p), hit.name)
         if (!found.includes(rel)) found.push(rel)
       }
-    } catch {
-      // Folder missing.
+      lookups.push(`${p}: ${hit ? `found as ${hit.name}` : `not among ${entries.length} entries`}`)
+    } catch (err) {
+      lookups.push(`${p}: no folder (${errText(err)})`)
     }
   }
   if (found[0] !== file) fileMtime = -1
@@ -197,6 +215,16 @@ function footerSessions(m: Model): SessionInfo[] {
 }
 
 async function refresh($: Engine, opts: { force?: boolean } = {}) {
+  // The session can change folder after it starts (the desktop app moving it into the project, /cd, a worktree).
+  const current = await $.session.root().catch(() => '')
+  if (current && current !== root) {
+    root = current
+    file = undefined
+    roadmap = undefined
+    roadmapText = ''
+    fileMtime = -1
+    discoveredAt = 0
+  }
   if (!root) return
   const now = Date.now()
   if (opts.force || !file || now - discoveredAt > DISCOVER_MS) await discover($)
@@ -267,6 +295,17 @@ async function tick($: Engine) {
 }
 
 
+async function fillIfNoTurn($: Engine, text: string) {
+  if (!initPending) return
+  initPending = false
+  const filled = await $.prompt.fill({ text }).catch(() => ({ isFilled: false }))
+  $.ui.toast(
+    filled.isFilled
+      ? 'Headway: the roadmap prompt is in the prompt box. Press Enter to send it.'
+      : 'Headway: could not start the roadmap prompt. Ask Claude to draft ROADMAP.md.',
+  )
+}
+
 function openPane($: Engine) {
   return $.ui.open({ id: PANE, title: 'Headway' })
 }
@@ -281,7 +320,8 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
-    root = (await $.session.repo())?.root ?? e.cwd
+    // The session's own project root: a worktree's, not the main checkout's.
+    root = (await $.session.root().catch(() => '')) || e.cwd
     selfId = await $.session.id()
     self = { sessionId: selfId, title: `Session ${selfId.slice(0, 6)}`, state: 'idle', updatedAt: 0 }
     try {
@@ -336,6 +376,7 @@ export const register: Register = (on, options) => {
   })
 
   on('turn.start', async ($, e, next) => {
+    initPending = false
     // Title the session after its first real prompt; tagged system text (notifications, reminders) doesn't count.
     const words = e.text.replace(/<([\w-]+)[^>]*>[\s\S]*?<\/\1>/g, '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
     const untitled = self.title.startsWith('Session ') || self.title.startsWith('<')
@@ -438,7 +479,9 @@ export const register: Register = (on, options) => {
         text: [
           file ? `Roadmap: ${abs(file)}` : 'No roadmap file found.',
           others.length ? `Also found (not used): ${others.join(', ')}` : '',
+          `Project root: ${root}`,
           `Search order: .headway/config.json "roadmap", then ${searchPaths.join(', ')}`,
+          ...lookups.map(l => `  ${l}`),
         ]
           .filter(Boolean)
           .join('\n'),
@@ -460,11 +503,13 @@ export const register: Register = (on, options) => {
 
     if (arg === 'init') {
       const target = file ?? searchPaths[0] ?? 'ROADMAP.md'
-      void $.prompt.submit({
-        text: file
-          ? `Review and update the roadmap in \`${file}\` against the current state of the code: mark finished items done, add missing work, keep its style.`
-          : INIT_PROMPT(target),
-      })
+      const text = file
+        ? `Review and update the roadmap in \`${file}\` against the current state of the code: mark finished items done, add missing work, keep its style.`
+        : INIT_PROMPT(target)
+      initPending = true
+      void $.prompt.submit({ text }).catch(() => undefined)
+      // Where the host doesn't start a turn for a plugin's prompt, hand the prompt to the person instead.
+      $.clock.after(INIT_WAIT_MS, () => fillIfNoTurn($, text))
       void openPane($)
       return { text: file ? `Asked Claude to refresh ${file}.` : `Asked Claude to draft ${target}.` }
     }
