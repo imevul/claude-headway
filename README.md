@@ -77,7 +77,17 @@ The pane docks beside the chat in the terminal's fullscreen layout at 110+ colum
 - `/headway where`: show which file is used and the search order.
 - `/headway band on|off`: show or hide the progress bar above the prompt.
 
-Each also works as `/headway:headway …`, the name the plugin's command file gives it.
+### `/headway` in a new desktop session
+
+Headway registers `/headway` when a session starts. The desktop app checks commands before that, so typing `/headway` as the first message of a new session shows "/headway isn't a command here". The command still runs.
+
+To make the app know `/headway` from the start, copy [`extras/headway.md`](extras/headway.md) into your personal commands folder:
+
+```bash
+mkdir -p ~/.claude/commands && cp extras/headway.md ~/.claude/commands/
+```
+
+If you set `CLAUDE_CONFIG_DIR`, use that folder's `commands/` instead of `~/.claude/commands`. Headway answers the command itself, so the file's text only reaches Claude if Headway isn't loaded.
 
 ## Develop
 

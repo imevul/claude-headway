@@ -546,10 +546,9 @@ export const register: Register = (on, options) => {
     return { result: `${verb} "${node.title}" (${node.key})${note}.` }
   }).catch(() => ({ result: 'Headway could not update the roadmap this time; carry on without it.' }))
 
-  // `/headway` is registered above; `/headway:headway` is the plugin's command file, which the desktop app
-  // lists before the session has started. Both run the same code, so the file's text never reaches the model.
+  // Also answers a personal `headway.md` command file (extras/headway.md), which the desktop app knows before
+  // the session has started, so that file's text never reaches the model.
   on('command.run', { command: 'headway' }, runCommand)
-  on('command.run', { command: 'headway:headway' }, runCommand).catch(() => ({ text: 'Headway hit an error running this command.' }))
 
   // The pane owns its scrolling so the header stays put: move our window, not the engine's.
   on('ui.scroll', { requestId: PANE }, async ($, e) => {
