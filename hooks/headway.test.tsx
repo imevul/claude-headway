@@ -55,7 +55,7 @@ function fakeFs(on: On, files: Record<string, string>) {
   return { touch: () => version++ }
 }
 
-function engine(on: On, files: Record<string, string>, place: { root?: string } = {}) {
+function engine(on: On, files: Record<string, string>, place: { root?: string; refuseCommand?: boolean } = {}) {
   mock.store(on)
   const clock = mock.clock(on)
   on('session.root', () => {
@@ -64,7 +64,10 @@ function engine(on: On, files: Record<string, string>, place: { root?: string } 
   })
   on('session.repo', () => ({ value: { root: '/proj', name: 'proj', remote: null, internal: false } }))
   on('session.id', () => ({ value: 'me-1234567' }))
-  on('command.register', () => ({ value: { command: 'headway' } }))
+  on('command.register', () => {
+    if (place.refuseCommand) return { deny: `"/headway" refused: it is the user's /headway` } as never
+    return { value: { command: 'headway' } }
+  })
   on('tool.register', () => ({ value: { tool: 'mcp__headway__focus' } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.toast', () => ({ value: undefined }) as never)
@@ -214,4 +217,19 @@ test("the agent's roadmap guide lists the things to check", async ($, on) => {
   const guide = composed.sections.find(s => s.id === 'headway')?.text ?? ''
   expect(guide).toMatch(/mcp__headway__focus/)
   expect(guide).toMatch(/line 2: "Phase 8 — Chat" is marked done but has open sub-items: "Later: threaded comment sync"/)
+})
+
+test('a refused /headway registration still leaves the session working', async ($, on) => {
+  const files: Record<string, string> = { '/proj/ROADMAP.md': ROADMAP }
+  const { clock } = engine(on, files, { refuseCommand: true })
+  await $.session.start({ cwd: '/proj', surface: 'desktop', isInteractive: true })
+  await clock.advance(1)
+
+  const r = await $.tool.call({ tool: 'mcp__headway__focus', item: 'Import' })
+  expect(String((r as { result?: unknown }).result)).toMatch(/Now on "Import"/)
+  const status = JSON.parse(files['/proj/.headway/sessions/me-1234567.json'] ?? '{}') as { itemKey?: string }
+  expect(status.itemKey).toBe('p2-settings/import')
+
+  const where = await $.command.run({ command: 'headway', args: 'where' } as never)
+  expect(String((where as { text?: unknown }).text)).toMatch(/command from your personal command file · focus tool registered/)
 })

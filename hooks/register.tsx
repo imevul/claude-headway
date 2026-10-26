@@ -104,8 +104,13 @@ let ticking = false
 let initPending = false
 let lookups: string[] = []
 let showBand = true
+const setupLog: Record<string, string> = {}
 
 const errText = (err: unknown) => (err instanceof Error ? err.message : String(err)).slice(0, 120)
+
+function setup(step: string, outcome: string) {
+  setupLog[step] = outcome
+}
 
 /** A roadmap path from config or discovery: relative to the project root, or absolute. */
 function abs(p: string) {
@@ -357,6 +362,7 @@ async function runCommand($: Engine, e: CommandRunInput) {
         file ? `Roadmap: ${abs(file)}` : 'No roadmap file found.',
         others.length ? `Also found (not used): ${others.join(', ')}` : '',
         `Project root: ${root}`,
+        `Session: ${selfId || 'unknown'} · command ${setupLog.command ?? 'not registered'} · focus tool ${setupLog.tool ?? 'not registered'}`,
         `Search order: .headway/config.json "roadmap", then ${searchPaths.join(', ')}`,
         ...lookups.map(l => `  ${l}`),
       ]
@@ -408,12 +414,23 @@ export const register: Register = (on, options) => {
 
 
   on('session.start', async ($, e, next) => {
-    // Commands and the tool first: the session takes input as soon as this hook returns.
-    await $.command.register({
-      name: 'headway',
-      description: 'Show the project roadmap pane (init: draft a roadmap, where: which file is used, band on|off: progress bar above the prompt)',
-      argumentHint: '[init | where | band on|off]',
-    })
+    // The command first, so it's known from the first keystroke. Each step is caught on its own: one that
+    // fails must not stop the rest of the start (the session's id, its timers, its status file).
+    await $.command
+      .register({
+        name: 'headway',
+        description: 'Show the project roadmap pane (init: draft a roadmap, where: which file is used, band on|off: progress bar above the prompt)',
+        argumentHint: '[init | where | band on|off]',
+      })
+      .then(
+        () => setup('command', 'registered'),
+        // A personal headway.md (extras/headway.md) takes the name; the command.run hook answers it all the same.
+        err => setup('command', /user's \/headway/.test(errText(err)) ? 'from your personal command file' : `failed: ${errText(err)}`),
+      )
+
+    const started = await next(e)
+
+    // A tool can be registered only once the session has bound, which happens beneath this hook.
     await $.tool.register({
       name: 'focus',
       isDeferred: false,
@@ -430,12 +447,14 @@ export const register: Register = (on, options) => {
         },
         required: ['item'],
       },
-    })
+    }).then(
+      () => setup('tool', 'registered'),
+      err => setup('tool', `failed: ${errText(err)}`),
+    )
 
-    const started = await next(e)
     // The session's own project root: a worktree's, not the main checkout's.
     root = (await $.session.root().catch(() => '')) || e.cwd
-    selfId = await $.session.id()
+    selfId = await $.session.id().catch(() => '')
     self = { sessionId: selfId, title: `Session ${selfId.slice(0, 6)}`, state: 'idle', updatedAt: 0 }
     $.clock.every(TICK_MS, () => tick($))
     // The rest reads files; it runs beside the session's start rather than holding it up.
