@@ -90,3 +90,7 @@ Then check it with:
 claude plugin validate .
 claude plugin test .
 ```
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).

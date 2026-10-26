@@ -2,6 +2,10 @@
   "name": "headway",
   "version": "0.1.0",
   "description": "Live roadmap pane: a nested, collapsible view of ROADMAP.md with what each session is working on right now",
+  "author": {
+    "name": "imevul"
+  },
+  "license": "Apache-2.0",
   "types": "./types/index.d.ts",
   "userConfig": {
     "searchPaths": {
