@@ -66,7 +66,7 @@ const INIT_PROMPT = (file: string) =>
   `\`- [x]\` done, \`- [~]\` in progress, \`- [ ]\` todo, \`- [!]\` blocked. Number top-level phases (P0, P1, ...). ` +
   `Mark what already exists as done, keep items outcome-sized (not tiny steps), and nest sub-items where a phase has parts.`
 
-const GUIDE = (file: string) =>
+const GUIDE = (file: string, checks: Warning[]) =>
   [
     `This project keeps its roadmap in \`${file}\` (a Markdown checklist, shown live in the Headway pane).`,
     'Markers: `[ ]` todo, `[~]` in progress, `[x]` done, `[!]` blocked, `~~text~~` dropped; nesting by indentation and headings.',
@@ -74,6 +74,15 @@ const GUIDE = (file: string) =>
     '- When an item is finished, call it again with `status: "done"` (or edit the marker yourself). Parents are derived from their children.',
     '- Add newly discovered roadmap-level work as items in the right place. Small steps belong in your task list, not the roadmap.',
     "- Keep the file's existing style; change only the lines you mean to.",
+    ...(checks.length
+      ? [
+          '',
+          `Things to check in \`${file}\` right now (the pane shows them too). Mention them to the user when they bear on the work; ` +
+            "fix one only when it's clearly right (say, the open item is in fact done), and otherwise ask:",
+          ...checks.slice(0, 10).map(c => `- line ${c.line}: ${c.message}`),
+          ...(checks.length > 10 ? [`- and ${checks.length - 10} more`] : []),
+        ]
+      : []),
   ].join('\n')
 
 // Module state: cheap caches a reload starts over, refilled by the next tick.
@@ -410,7 +419,8 @@ export const register: Register = (on, options) => {
   on('prompt.compose', async ($, e, next) => {
     const composed = await next(e)
     if (!file) return composed
-    return { sections: [...composed.sections, { id: 'headway', text: GUIDE(file), scope: 'session' as const }] }
+    const checks = roadmap?.warnings.filter(w => w.kind === 'check') ?? []
+    return { sections: [...composed.sections, { id: 'headway', text: GUIDE(file, checks), scope: 'session' as const }] }
   })
 
   // Mirror the session's task list into its live status: the desktop app's update_plan, the CLI's TodoWrite.

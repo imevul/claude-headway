@@ -202,3 +202,16 @@ test('/headway init puts the prompt in the prompt box when no turn starts', asyn
   expect(filled.length).toBe(1)
   expect(filled[0]).toMatch(/Draft a roadmap for this project in `ROADMAP\.md`/)
 })
+
+test("the agent's roadmap guide lists the things to check", async ($, on) => {
+  const roadmap = '# R\n### Phase 8 — Chat ✅\n- ✅ feeds\n- ⬜ Later: threaded comment sync\n### Phase 9\n- [ ] next'
+  const { clock } = engine(on, { '/proj/ROADMAP.md': roadmap })
+  on('prompt.compose', () => ({ sections: [] }))
+  await $.session.start({ cwd: '/proj', surface: 'desktop', isInteractive: true })
+  await clock.advance(1)
+
+  const composed = await $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: [], tools: [], outputStyle: null, traits: [] } as never)
+  const guide = composed.sections.find(s => s.id === 'headway')?.text ?? ''
+  expect(guide).toMatch(/mcp__headway__focus/)
+  expect(guide).toMatch(/line 2: "Phase 8 — Chat" is marked done but has open sub-items: "Later: threaded comment sync"/)
+})

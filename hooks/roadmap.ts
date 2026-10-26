@@ -252,8 +252,15 @@ export function parseRoadmap(input: string): Roadmap {
       done = 0
       total = 0
     }
-    if (node.explicit && status === 'done' && children.some(c => c.status === 'todo' || c.status === 'doing' || c.status === 'blocked')) {
-      warnings.push({ line: node.line + 1, message: `"${node.title}" is marked done but has open sub-items`, kind: 'check' })
+    const open = children.filter(c => !c.info && (c.status === 'todo' || c.status === 'doing' || c.status === 'blocked'))
+    if (node.explicit && status === 'done' && open.length) {
+      const names = open.slice(0, 3).map(c => `"${c.title.length > 60 ? c.title.slice(0, 59) + '…' : c.title}"`)
+      const rest = open.length > 3 ? ` and ${open.length - 3} more` : ''
+      warnings.push({
+        line: node.line + 1,
+        message: `"${node.title}" is marked done but has open sub-items: ${names.join(', ')}${rest}`,
+        kind: 'check',
+      })
     }
 
     const out: RoadmapNode = {

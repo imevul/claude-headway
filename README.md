@@ -53,7 +53,7 @@ In the desktop app, where `/plugin` doesn't run:
   Emoji also work (✅ ⬜ 🔁 ⬅️ 🚧 ❌), as do `DONE:` or `WIP:` prefixes.
 - **Notes sections:** in a roadmap that uses markers, a heading whose whole section has none (say, "Known limitations") is treated as notes. It's shown dimmed and left out of the progress count.
 - **Nesting:** `##`/`###` headings and indented items nest to any depth (slices → sprints → phases → tasks). A parent without a marker takes its status from its children.
-- **Forgiving parser:** it accepts mixed bullets, tabs and odd indentation. It skips code blocks, front matter, comments and tables. Lines it can't understand are listed in the pane and never break it, as are things to check, like a section marked done that still has open items.
+- **Forgiving parser:** it accepts mixed bullets, tabs and odd indentation. It skips code blocks, front matter, comments and tables. Lines it can't understand are listed in the pane and never break it, as are things to check, like a section marked done that still has open items. Claude is told about those too, so it can raise them or fix them when it works on that part.
 - **Live status:** each session writes `.headway/sessions/<id>.json`, which is git-ignored automatically.
   - The pane shows which session is on which item, and the step it's on. The step is mirrored from the session's task list.
   - Claude reports the item with the `mcp__headway__focus` tool. That tool also flips the item's marker in the file.
