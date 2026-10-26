@@ -1,5 +1,13 @@
 {
   "name": "claude-headway",
-  "owner": { "name": "imevul" },
-  "plugins": [{ "name": "headway", "source": "./" }]
+  "owner": {
+    "name": "Imevul",
+    "url": "https://github.com/imevul"
+  },
+  "plugins": [
+    {
+      "name": "headway",
+      "source": "./"
+    }
+  ]
 }
