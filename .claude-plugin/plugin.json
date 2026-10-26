@@ -1,0 +1,20 @@
+{
+  "name": "headway",
+  "version": "0.1.0",
+  "description": "Live roadmap pane: a nested, collapsible view of ROADMAP.md with what each session is working on right now",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "searchPaths": {
+      "type": "string",
+      "title": "Roadmap search paths",
+      "description": "Comma-separated paths, relative to the project root, checked in order for the roadmap file (file names match case-insensitively)",
+      "default": "ROADMAP.md, docs/ROADMAP.md, docs/internal/ROADMAP.md"
+    },
+    "showBand": {
+      "type": "boolean",
+      "title": "Progress bar above the prompt",
+      "description": "Show the roadmap's progress bar just above the prompt box",
+      "default": true
+    }
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "name": "claude-headway",
+  "owner": { "name": "imevul" },
+  "plugins": [{ "name": "headway", "source": "./" }]
+}
