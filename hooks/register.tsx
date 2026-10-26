@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { CommandRunInput, EngineInterface, Register } from 'claude-code'
 
 import type { Model, Override, RoadmapNode, SessionInfo, Status, Warning, WindowState } from '../types'
 import { leafStatuses, progressSvg } from './art'
@@ -126,17 +126,17 @@ async function discover($: Engine) {
   } catch {
     // No project override.
   }
-  lookups = []
+  const seen: string[] = []
   for (const p of searchPaths) {
     // The exact name first; then the folder's listing, for another spelling of the name.
     try {
       if (await $.fs.exists(abs(p))) {
         if (!found.includes(p)) found.push(p)
-        lookups.push(`${p}: found`)
+        seen.push(`${p}: found`)
         continue
       }
     } catch (err) {
-      lookups.push(`${p}: exists failed (${errText(err)})`)
+      seen.push(`${p}: exists failed (${errText(err)})`)
     }
     try {
       const entries = await $.fs.list(abs(dirOf(p) || '.'))
@@ -145,11 +145,12 @@ async function discover($: Engine) {
         const rel = join(dirOf(p), hit.name)
         if (!found.includes(rel)) found.push(rel)
       }
-      lookups.push(`${p}: ${hit ? `found as ${hit.name}` : `not among ${entries.length} entries`}`)
+      seen.push(`${p}: ${hit ? `found as ${hit.name}` : `not among ${entries.length} entries`}`)
     } catch (err) {
-      lookups.push(`${p}: no folder (${errText(err)})`)
+      seen.push(`${p}: no folder (${errText(err)})`)
     }
   }
+  lookups = seen
   if (found[0] !== file) fileMtime = -1
   file = found[0]
   others = found.slice(1)
@@ -346,6 +347,54 @@ async function load($: Engine, surface: string | null) {
   if (file && (surface === 'desktop' || surface === 'vscode')) void openPane($)
 }
 
+async function runCommand($: Engine, e: CommandRunInput) {
+  const arg = e.args.trim().toLowerCase()
+  await refresh($, { force: true })
+
+  if (arg === 'where') {
+    return {
+      text: [
+        file ? `Roadmap: ${abs(file)}` : 'No roadmap file found.',
+        others.length ? `Also found (not used): ${others.join(', ')}` : '',
+        `Project root: ${root}`,
+        `Search order: .headway/config.json "roadmap", then ${searchPaths.join(', ')}`,
+        ...lookups.map(l => `  ${l}`),
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    }
+  }
+
+  if (arg === 'band' || arg.startsWith('band ')) {
+    const want = arg === 'band' ? !showBand : !/\b(off|hide|false|no)\b/.test(arg)
+    showBand = want
+    // The option is a settings row (what /config shows in a terminal); keep a store copy where no row is reachable.
+    const row = (await $.config.list()).find(r => /^headway(@[^.]*)?\.showBand$/.test(r.key))
+    const set = row ? await $.config.set({ key: row.key, value: want }) : { deny: 'no settings row' }
+    if (set.deny) await $.store.set('showBand', want)
+    else await $.store.delete('showBand')
+    $.ui.invalidate('ui.render')
+    const where = set.deny ? 'for now (it could not be saved to settings)' : 'and saved to your settings'
+    return { text: `Progress bar above the prompt: ${want ? 'on' : 'off'}, ${where}.` }
+  }
+
+  if (arg === 'init') {
+    const target = file ?? searchPaths[0] ?? 'ROADMAP.md'
+    const text = file
+      ? `Review and update the roadmap in \`${file}\` against the current state of the code: mark finished items done, add missing work, keep its style.`
+      : INIT_PROMPT(target)
+    initPending = true
+    void $.prompt.submit({ text }).catch(() => undefined)
+    // Where the host doesn't start a turn for a plugin's prompt, hand the prompt to the person instead.
+    $.clock.after(INIT_WAIT_MS, () => fillIfNoTurn($, text))
+    void openPane($)
+    return { text: file ? `Asked Claude to refresh ${file}.` : `Asked Claude to draft ${target}.` }
+  }
+
+  await openPane($)
+  return { text: file ? `Headway: showing ${file}.` : `Headway: no roadmap yet (looked in ${searchPaths.join(', ')}).` }
+}
+
 function openPane($: Engine) {
   return $.ui.open({ id: PANE, title: 'Headway' })
 }
@@ -497,53 +546,10 @@ export const register: Register = (on, options) => {
     return { result: `${verb} "${node.title}" (${node.key})${note}.` }
   }).catch(() => ({ result: 'Headway could not update the roadmap this time; carry on without it.' }))
 
-  on('command.run', { command: 'headway' }, async ($, e) => {
-    const arg = e.args.trim().toLowerCase()
-    await refresh($, { force: true })
-
-    if (arg === 'where') {
-      return {
-        text: [
-          file ? `Roadmap: ${abs(file)}` : 'No roadmap file found.',
-          others.length ? `Also found (not used): ${others.join(', ')}` : '',
-          `Project root: ${root}`,
-          `Search order: .headway/config.json "roadmap", then ${searchPaths.join(', ')}`,
-          ...lookups.map(l => `  ${l}`),
-        ]
-          .filter(Boolean)
-          .join('\n'),
-      }
-    }
-
-    if (arg === 'band' || arg.startsWith('band ')) {
-      const want = arg === 'band' ? !showBand : !/\b(off|hide|false|no)\b/.test(arg)
-      showBand = want
-      // The option is a settings row (what /config shows in a terminal); keep a store copy where no row is reachable.
-      const row = (await $.config.list()).find(r => /^headway(@[^.]*)?\.showBand$/.test(r.key))
-      const set = row ? await $.config.set({ key: row.key, value: want }) : { deny: 'no settings row' }
-      if (set.deny) await $.store.set('showBand', want)
-      else await $.store.delete('showBand')
-      $.ui.invalidate('ui.render')
-      const where = set.deny ? 'for now (it could not be saved to settings)' : 'and saved to your settings'
-      return { text: `Progress bar above the prompt: ${want ? 'on' : 'off'}, ${where}.` }
-    }
-
-    if (arg === 'init') {
-      const target = file ?? searchPaths[0] ?? 'ROADMAP.md'
-      const text = file
-        ? `Review and update the roadmap in \`${file}\` against the current state of the code: mark finished items done, add missing work, keep its style.`
-        : INIT_PROMPT(target)
-      initPending = true
-      void $.prompt.submit({ text }).catch(() => undefined)
-      // Where the host doesn't start a turn for a plugin's prompt, hand the prompt to the person instead.
-      $.clock.after(INIT_WAIT_MS, () => fillIfNoTurn($, text))
-      void openPane($)
-      return { text: file ? `Asked Claude to refresh ${file}.` : `Asked Claude to draft ${target}.` }
-    }
-
-    await openPane($)
-    return { text: file ? `Headway: showing ${file}.` : `Headway: no roadmap yet (looked in ${searchPaths.join(', ')}).` }
-  })
+  // `/headway` is registered above; `/headway:headway` is the plugin's command file, which the desktop app
+  // lists before the session has started. Both run the same code, so the file's text never reaches the model.
+  on('command.run', { command: 'headway' }, runCommand)
+  on('command.run', { command: 'headway:headway' }, runCommand).catch(() => ({ text: 'Headway hit an error running this command.' }))
 
   // The pane owns its scrolling so the header stays put: move our window, not the engine's.
   on('ui.scroll', { requestId: PANE }, async ($, e) => {

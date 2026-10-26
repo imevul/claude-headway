@@ -77,6 +77,8 @@ The pane docks beside the chat in the terminal's fullscreen layout at 110+ colum
 - `/headway where`: show which file is used and the search order.
 - `/headway band on|off`: show or hide the progress bar above the prompt.
 
+Each also works as `/headway:headway …`, the name the plugin's command file gives it.
+
 ## Develop
 
 To run Headway from a working copy, name its folder in `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of your Claude Code `settings.json`:
