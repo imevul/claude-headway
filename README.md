@@ -2,24 +2,38 @@
 
 A live roadmap pane for Claude Code. It shows how far along a project is, what's being worked on right now, and which session is on what.
 
-```
-Demo roadmap
-▰▰▰▰▰▰▰▰▱▱▱▱▱
-58% · 7 of 12 done · 2 of 3 sessions working
-docs/internal/ROADMAP.md
+The roadmap pane beside the chat:
 
-✓ ▸ 3 completed   P0: Skeleton – P1b: Theming
-● ▾ P2: Settings page  2/4
-    ✓ General tab
-    ● User tab  ◂ now
-      ● Fix avatar crop (this session) — wiring upload
-    ○ Import / export tab
-○ ▸ P3: Authentication  0/3
-```
+![The Headway pane: the roadmap as a collapsible tree, with the item in progress marked "now"](docs/images/pane.png)
 
-In the desktop app the progress bar is a coloured strip with one segment per item. The terminal draws it as text.
+And a progress bar just above the prompt box:
+
+![The progress bar above the prompt: one segment per item, 89% · 16/18](docs/images/band.png)
+
+In the terminal, the progress bar is drawn as text.
 
 ## Install
+
+### Let Claude do it
+
+Paste this into a Claude Code session:
+
+```text
+Install the Headway plugin for Claude Code from https://github.com/imevul/claude-headway:
+
+1. Install it at user scope: run `claude plugin install headway --marketplace imevul/claude-headway`
+   in a shell, adding the marketplace if it asks.
+2. Install its personal /headway command: copy `extras/headway.md` from the installed plugin
+   (or from https://raw.githubusercontent.com/imevul/claude-headway/main/extras/headway.md)
+   to `commands/headway.md` in my Claude config folder: `$CLAUDE_CONFIG_DIR` if that is set,
+   otherwise `~/.claude`. Create the folder if needed. If a headway.md is already there,
+   show me the difference and ask before replacing it.
+3. Tell me what you installed and where, and that Headway loads in sessions started from now on.
+```
+
+The personal command is optional. It lets the desktop app recognise `/headway` from the first message of a new session; see [below](#headway-in-a-new-desktop-session).
+
+### By hand
 
 At the prompt of a terminal session:
 
