@@ -26,7 +26,7 @@ export function currentKey(nodes: RoadmapNode[], sessions: SessionInfo[], selfId
     if (n.status === 'doing' && !n.children.some(c => c.status === 'doing')) return n.key
   }
   for (const [n] of walk(nodes)) {
-    if (!n.isHeading && n.status === 'todo' && !n.children.length) return n.key
+    if (!n.isHeading && !n.info && n.status === 'todo' && !n.children.length) return n.key
   }
   return undefined
 }

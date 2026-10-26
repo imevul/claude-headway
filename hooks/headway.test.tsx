@@ -75,8 +75,9 @@ function engine(on: On, files: Record<string, string>, place: { root?: string } 
 
 test('the pane opens the branch in progress and toggles rows, on terminal and desktop', async ($, on) => {
   const files: Record<string, string> = { '/proj/docs/internal/Roadmap.md': ROADMAP }
-  engine(on, files)
+  const { clock } = engine(on, files)
   await $.session.start({ cwd: '/proj', surface: 'terminal', isInteractive: true })
+  await clock.advance(1)
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -97,8 +98,9 @@ test('the pane opens the branch in progress and toggles rows, on terminal and de
 
 test('focus marks the item in the file and another session shows under its item', async ($, on) => {
   const files: Record<string, string> = { '/proj/ROADMAP.md': ROADMAP }
-  engine(on, files)
+  const { clock } = engine(on, files)
   await $.session.start({ cwd: '/proj', surface: 'desktop', isInteractive: true })
+  await clock.advance(1)
 
   const r = await $.tool.call({ tool: 'mcp__headway__focus', item: 'Import', step: 'parsing CSV' })
   expect(String((r as { result?: unknown }).result)).toMatch(/Now on "Import"/)
@@ -118,8 +120,9 @@ test('focus marks the item in the file and another session shows under its item'
 })
 
 test('with no roadmap the pane says where it looked', async ($, on) => {
-  engine(on, {})
+  const { clock } = engine(on, {})
   await $.session.start({ cwd: '/proj', surface: 'terminal', isInteractive: true })
+  await clock.advance(1)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await ui.find({ type: 'Text', text: /Looked for/ }))?.text).toMatch(/ROADMAP\.md, docs\/ROADMAP\.md, docs\/internal\/ROADMAP\.md/)
   expect(await ui.find({ key: 'init' })).toBeDefined()
@@ -127,8 +130,9 @@ test('with no roadmap the pane says where it looked', async ($, on) => {
 })
 
 test('the band above the prompt shows the progress bar', async ($, on) => {
-  engine(on, { '/proj/ROADMAP.md': ROADMAP })
+  const { clock } = engine(on, { '/proj/ROADMAP.md': ROADMAP })
   await $.session.start({ cwd: '/proj', surface: 'desktop', isInteractive: true })
+  await clock.advance(1)
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({
       plugin: 'headway',
@@ -144,13 +148,14 @@ test('the band above the prompt shows the progress bar', async ($, on) => {
 })
 
 test('/headway band off hides the progress bar', async ($, on) => {
-  engine(on, { '/proj/ROADMAP.md': ROADMAP })
+  const { clock } = engine(on, { '/proj/ROADMAP.md': ROADMAP })
   on('config.list', () => ({ value: [] }))
   on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
     const { Text } = $.ui.resolve(e)
     return <Text>engine band</Text>
   })
   await $.session.start({ cwd: '/proj', surface: 'desktop', isInteractive: true })
+  await clock.advance(1)
   const out = await $.command.run({ command: 'headway', args: 'band off' } as never)
   expect(String((out as { text?: unknown }).text)).toMatch(/off/)
 
@@ -168,8 +173,9 @@ test('/headway band off hides the progress bar', async ($, on) => {
 
 test('a session that moves into the project after it starts finds the roadmap', async ($, on) => {
   const place = { root: '/home/me' }
-  engine(on, { '/proj/ROADMAP.md': ROADMAP }, place)
+  const { clock } = engine(on, { '/proj/ROADMAP.md': ROADMAP }, place)
   await $.session.start({ cwd: '/home/me', surface: 'desktop', isInteractive: true })
+  await clock.advance(1)
   const before = await $.command.run({ command: 'headway', args: 'where' } as never)
   expect(String((before as { text?: unknown }).text)).toMatch(/No roadmap file found/)
 
@@ -188,6 +194,7 @@ test('/headway init puts the prompt in the prompt box when no turn starts', asyn
     return { isFilled: true }
   })
   await $.session.start({ cwd: '/proj', surface: 'desktop', isInteractive: true })
+  await clock.advance(1)
   const out = await $.command.run({ command: 'headway', args: 'init' } as never)
   expect(String((out as { text?: unknown }).text)).toMatch(/draft ROADMAP\.md/)
   expect(filled).toEqual([])

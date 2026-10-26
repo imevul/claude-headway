@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Model, Override, RoadmapNode, SessionInfo, Status, WindowState } from '../types'
+import type { Model, Override, RoadmapNode, SessionInfo, Status, Warning, WindowState } from '../types'
 import { leafStatuses, progressSvg } from './art'
 import { currentKey, flatten, reconcile, type Row } from './expand'
 import { matchItem, parseRoadmap, progress, setStatus } from './roadmap'
@@ -41,6 +41,18 @@ function shortPath(p: string): string {
   if (root && p.startsWith(root + '/')) return p.slice(root.length + 1)
   const parts = p.split('/').filter(Boolean)
   return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : p
+}
+
+/** "2 lines not understood · 1 thing to check" */
+function noticeLabel(warnings: Warning[]): string {
+  const n = (k: string) => warnings.filter(w => w.kind === k).length
+  const plural = (c: number, one: string, many: string) => `${c} ${c === 1 ? one : many}`
+  return [
+    n('parse') ? plural(n('parse'), 'line not understood', 'lines not understood') : '',
+    n('check') ? plural(n('check'), 'thing to check', 'things to check') : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
 }
 
 function bar(done: number, total: number, width = 10): string {
@@ -306,6 +318,25 @@ async function fillIfNoTurn($: Engine, text: string) {
   )
 }
 
+async function load($: Engine, surface: string | null) {
+  try {
+    // A reload (or a resumed session) picks up its own claim and step where it left them.
+    const saved = JSON.parse(await $.fs.read(join(sessionsDir(), `${selfId}.json`))) as SessionInfo
+    self = { ...self, ...saved, sessionId: selfId }
+  } catch {
+    // First start in this project.
+  }
+
+  const band = await $.store.get('showBand')
+  if (typeof band === 'boolean') showBand = band
+
+  const stored = (await $.store.get(`overrides:${root}`)) as Record<string, Override> | undefined
+  if (stored && Object.keys(await read($, overrides)).length === 0) await update($, overrides, () => stored)
+
+  await refresh($, { force: true })
+  if (file && (surface === 'desktop' || surface === 'vscode')) void openPane($)
+}
+
 function openPane($: Engine) {
   return $.ui.open({ id: PANE, title: 'Headway' })
 }
@@ -319,25 +350,7 @@ export const register: Register = (on, options) => {
 
 
   on('session.start', async ($, e, next) => {
-    const started = await next(e)
-    // The session's own project root: a worktree's, not the main checkout's.
-    root = (await $.session.root().catch(() => '')) || e.cwd
-    selfId = await $.session.id()
-    self = { sessionId: selfId, title: `Session ${selfId.slice(0, 6)}`, state: 'idle', updatedAt: 0 }
-    try {
-      // A reload (or a resumed session) picks up its own claim and step where it left them.
-      const saved = JSON.parse(await $.fs.read(join(sessionsDir(), `${selfId}.json`))) as SessionInfo
-      self = { ...self, ...saved, sessionId: selfId }
-    } catch {
-      // First start in this project.
-    }
-
-    const band = await $.store.get('showBand')
-    if (typeof band === 'boolean') showBand = band
-
-    const stored = (await $.store.get(`overrides:${root}`)) as Record<string, Override> | undefined
-    if (stored && Object.keys(await read($, overrides)).length === 0) await update($, overrides, () => stored)
-
+    // Commands and the tool first: the session takes input as soon as this hook returns.
     await $.command.register({
       name: 'headway',
       description: 'Show the project roadmap pane (init: draft a roadmap, where: which file is used, band on|off: progress bar above the prompt)',
@@ -361,10 +374,14 @@ export const register: Register = (on, options) => {
       },
     })
 
-    await refresh($, { force: true })
+    const started = await next(e)
+    // The session's own project root: a worktree's, not the main checkout's.
+    root = (await $.session.root().catch(() => '')) || e.cwd
+    selfId = await $.session.id()
+    self = { sessionId: selfId, title: `Session ${selfId.slice(0, 6)}`, state: 'idle', updatedAt: 0 }
     $.clock.every(TICK_MS, () => tick($))
-    if (file && (e.surface === 'desktop' || e.surface === 'vscode')) void openPane($)
-
+    // The rest reads files; it runs beside the session's start rather than holding it up.
+    $.clock.after(0, () => load($, e.surface))
     return started
   })
 
@@ -647,9 +664,9 @@ export const register: Register = (on, options) => {
       }
 
       const n = r.node
-      const [glyph, color] = GLYPH[n.status]
+      const [glyph, color] = n.info ? ['·', undefined] : GLYPH[n.status]
       const count = n.children.length && n.total ? `${n.done}/${n.total}` : ''
-      const quiet = (n.status === 'done' || n.status === 'dropped' || n.status === 'todo') && !r.isCurrent && !n.isHeading
+      const quiet = n.info || ((n.status === 'done' || n.status === 'dropped' || n.status === 'todo') && !r.isCurrent && !n.isHeading)
       const room = cols - r.depth * 2 - 4 - (count ? count.length + 1 : 0) - (r.isCurrent ? 6 : 0)
       const title = cut(n.title, room)
       return line(
@@ -677,29 +694,38 @@ export const register: Register = (on, options) => {
     }
 
     const extra = footerSessions(m)
+    const unread = m.roadmap.warnings.some(wn => wn.kind === 'parse')
     const working = m.sessions.filter(s => s.state === 'working' && now - s.updatedAt <= STALE_MS).length
     const title = m.roadmap.title ?? baseOf(m.root)
     const path = shortPath(m.file)
-    const stats = `${pct}% · ${p.done} of ${p.total} done${m.sessions.length > 1 ? ` · ${working} of ${m.sessions.length} sessions working` : ''}`
+    const short = `${pct}% · ${p.done}/${p.total}`
+    const more = m.sessions.length > 1 ? `${working} of ${m.sessions.length} sessions working` : ''
 
     let picture: unknown = null
     if (e.surface !== 'terminal') {
       const { Svg } = $.ui.resolve(e)
-      picture = <Svg source={progressSvg(leafStatuses(nodes))} alt={`${pct}% done`} height={8} />
+      picture = <Svg source={progressSvg(leafStatuses(nodes), 600, 8)} alt={`${pct}% done`} height={8} />
     }
 
     return (
       <Box flexDirection="column">
         <Box flexDirection="column" marginBottom={1}>
           <Text weight="semibold" size="heading" wrap="truncate-end">{cut(title, cols)}</Text>
-          {picture ? (
-            (picture as never)
-          ) : (
-            <Text color="success">{bar(p.done, p.total, Math.min(24, Math.max(6, cols - 2)))}</Text>
-          )}
-          <Text dimColor size="caption" tabular wrap="truncate-end">
-            {cut(stats, cols)}
-          </Text>
+          <Box flexDirection="row" alignItems="center" gap={1}>
+            {picture ? (
+              <Box flexGrow={1}>{picture as never}</Box>
+            ) : (
+              <Text color="success">{bar(p.done, p.total, Math.max(6, Math.min(24, cols - short.length - 2)))}</Text>
+            )}
+            <Text dimColor size="caption" tabular>
+              {short}
+            </Text>
+          </Box>
+          {more ? (
+            <Text dimColor size="caption" wrap="truncate-end">
+              {cut(more, cols)}
+            </Text>
+          ) : null}
           <Text dimColor size="caption" wrap="truncate-end">
             {cut(path + (m.others.length ? `  (also: ${m.others.join(', ')})` : ''), cols)}
           </Text>
@@ -731,9 +757,9 @@ export const register: Register = (on, options) => {
         {m.readError ? <Text color="error">{cut(m.readError, cols)}</Text> : null}
         {m.roadmap.warnings.length ? (
           <Box flexDirection="row" gap={1} marginTop={1}>
-            <Text color="warning">⚠</Text>
+            {unread ? <Text color="warning">⚠</Text> : <Text dimColor>ⓘ</Text>}
             <Button key="warnings" plain dimColor onPress={() => update($, showWarnings, v => !v)}>
-              {`${warn ? '▾' : '▸'} ${m.roadmap.warnings.length} line${m.roadmap.warnings.length === 1 ? '' : 's'} not understood`}
+              {`${warn ? '▾' : '▸'} ${noticeLabel(m.roadmap.warnings)}`}
             </Button>
           </Box>
         ) : null}

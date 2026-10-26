@@ -19,12 +19,13 @@ const MARKS: [string, Status][] = [
   ['✔️', 'done'], ['☑️', 'done'], ['✅', 'done'], ['✔', 'done'], ['☑', 'done'],
   ['🔁', 'doing'], ['🔄', 'doing'], ['🚧', 'doing'], ['⬅️', 'doing'], ['⬅', 'doing'], ['⏳', 'doing'], ['👉', 'doing'],
   ['❌', 'blocked'], ['⛔', 'blocked'], ['🛑', 'blocked'], ['⚠️', 'blocked'],
+  ['⬜', 'todo'], ['◻️', 'todo'], ['◻', 'todo'], ['☐', 'todo'], ['🔲', 'todo'],
 ]
 const TAGS: [RegExp, Status][] = [
   [/^(?:[(\[](?:done|complete|completed|finished)[)\]]\s*|(?:done|complete|completed|finished)\s*[:\-–—]\s*)/i, 'done'],
   [/\s+[(\[](?:done|complete|completed|finished)[)\]]$/i, 'done'],
-  [/^(?:[(\[](?:wip|in[ -]progress|doing|current)[)\]]\s*|(?:wip|in[ -]progress|doing|current)\s*[:\-–—]\s*)/i, 'doing'],
-  [/\s+[(\[](?:wip|in[ -]progress|doing|current)[)\]]$/i, 'doing'],
+  [/^(?:[(\[](?:wip|in[ -]progress|doing)[)\]]\s*|(?:wip|in[ -]progress|doing)\s*[:\-–—]\s*)/i, 'doing'],
+  [/\s+[(\[](?:wip|in[ -]progress|doing)[)\]]$/i, 'doing'],
   [/^(?:[(\[]blocked[)\]]\s*|blocked\s*[:\-–—]\s*)/i, 'blocked'],
   [/\s+[(\[]blocked[)\]]$/i, 'blocked'],
 ]
@@ -176,7 +177,7 @@ export function parseRoadmap(input: string): Roadmap {
         title = cleanTitle(readMarkers(text).title)
       } else {
         const { title: t, status, unknownBox } = readMarkers(text)
-        if (unknownBox !== undefined) warnings.push({ line: i + 1, message: `Unknown checkbox "[${unknownBox}]", read as todo` })
+        if (unknownBox !== undefined) warnings.push({ line: i + 1, message: `Unknown checkbox "[${unknownBox}]", read as todo`, kind: 'parse' })
         while (headings.length && (headings[headings.length - 1]?.level ?? 0) >= level) headings.pop()
         const node = draft(t, status, i, true, -1, level)
         attach(node, headings[headings.length - 1])
@@ -202,7 +203,7 @@ export function parseRoadmap(input: string): Roadmap {
         continue
       }
       const { title: t, status, unknownBox } = readMarkers(text)
-      if (unknownBox !== undefined) warnings.push({ line: i + 1, message: `Unknown checkbox "[${unknownBox}]", read as todo` })
+      if (unknownBox !== undefined) warnings.push({ line: i + 1, message: `Unknown checkbox "[${unknownBox}]", read as todo`, kind: 'parse' })
       while (items.length && (items[items.length - 1]?.indent ?? 0) >= indent) items.pop()
       const node = draft(t, status, i, false, indent, 0)
       attach(node, items[items.length - 1] ?? headings[headings.length - 1])
@@ -220,15 +221,20 @@ export function parseRoadmap(input: string): Roadmap {
     afterBlank = false
   }
 
-  if (fence) warnings.push({ line: fenceLine + 1, message: 'Code block is never closed; the rest of the file was skipped' })
+  if (fence) warnings.push({ line: fenceLine + 1, message: 'Code block is never closed; the rest of the file was skipped', kind: 'parse' })
 
-  const finish = (node: Draft, parentKey: string, seen: Map<string, number>): RoadmapNode => {
+  // In a roadmap that marks its items, a heading whose whole section has no marker is notes, not work.
+  const marked = (d: Draft): boolean => d.explicit || d.children.some(c => marked(c as Draft))
+  const usesMarkers = roots.some(marked)
+
+  const finish = (node: Draft, parentKey: string, seen: Map<string, number>, inInfo = false): RoadmapNode => {
+    const info = inInfo || (usesMarkers && node.isHeading && !marked(node))
     const base = slug(node.title)
     const count = (seen.get(base) ?? 0) + 1
     seen.set(base, count)
     const key = (parentKey ? parentKey + '/' : '') + (count > 1 ? `${base}#${count}` : base)
     const childSeen = new Map<string, number>()
-    const children = node.children.map(c => finish(c as Draft, key, childSeen))
+    const children = node.children.map(c => finish(c as Draft, key, childSeen, info))
 
     let done = 0
     let total = 0
@@ -242,12 +248,12 @@ export function parseRoadmap(input: string): Roadmap {
       total = 1
       done = status === 'done' ? 1 : 0
     }
-    if (status === 'dropped') {
+    if (status === 'dropped' || info) {
       done = 0
       total = 0
     }
     if (node.explicit && status === 'done' && children.some(c => c.status === 'todo' || c.status === 'doing' || c.status === 'blocked')) {
-      warnings.push({ line: node.line + 1, message: `"${node.title}" is marked done but has open sub-items` })
+      warnings.push({ line: node.line + 1, message: `"${node.title}" is marked done but has open sub-items`, kind: 'check' })
     }
 
     const out: RoadmapNode = {
@@ -255,6 +261,7 @@ export function parseRoadmap(input: string): Roadmap {
       line: node.line, children, done, total,
     }
     if (node.noteLines.length) out.note = node.noteLines.join(' ')
+    if (info) out.info = true
     return out
   }
 
@@ -265,8 +272,8 @@ export function parseRoadmap(input: string): Roadmap {
 }
 
 export function deriveStatus(children: RoadmapNode[]): Status {
-  const live = children.filter(c => c.status !== 'dropped')
-  if (!live.length) return children.length ? 'dropped' : 'todo'
+  const live = children.filter(c => c.status !== 'dropped' && !c.info)
+  if (!live.length) return children.some(c => c.status === 'dropped' && !c.info) ? 'dropped' : 'todo'
   if (live.every(c => c.status === 'done')) return 'done'
   if (live.some(c => c.status === 'doing')) return 'doing'
   if (live.some(c => c.status === 'done')) return 'doing'

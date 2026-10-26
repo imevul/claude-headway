@@ -7,6 +7,8 @@ export type RoadmapNode = {
   /** Whether the status was written on the line, rather than derived from children. */
   explicit: boolean
   isHeading: boolean
+  /** A section with no status markers in a roadmap that otherwise has them (known limitations, notes): not counted. */
+  info?: boolean
   /** 0-based line in the file. */
   line: number
   note?: string
@@ -16,7 +18,8 @@ export type RoadmapNode = {
   total: number
 }
 
-export type Warning = { line: number; message: string }
+/** `parse`: a line that could not be read as meant. `check`: read fine, but inconsistent (a done parent with open items). */
+export type Warning = { line: number; message: string; kind: 'parse' | 'check' }
 
 export type Roadmap = {
   title?: string

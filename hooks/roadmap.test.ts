@@ -113,6 +113,35 @@ describe('parseRoadmap', () => {
     ])
   })
 
+  test('⬜ is a todo marker, and "(current)" is a label, not a status', () => {
+    const doc = parseRoadmap('## v0.1 — Core (current)\n- ✅ a\n- ✅ b\n## v0.2\n- ⬜ Rich text\n- ✅ done one')
+    expect(doc.nodes[0]!.title).toBe('v0.1 — Core (current)')
+    expect(doc.nodes[0]!.status).toBe('done')
+    expect(doc.nodes[1]!.children.map(n => [n.title, n.status, n.explicit])).toEqual([
+      ['Rich text', 'todo', true],
+      ['done one', 'done', true],
+    ])
+  })
+
+  test('an unmarked section in a marked roadmap is notes, not work', () => {
+    const doc = parseRoadmap('## Work\n- [x] a\n- [ ] b\n## Known limitations\n- slow search\n- no attachments')
+    const notes = doc.nodes[1]!
+    expect(notes.info).toBe(true)
+    expect(notes.children.every(c => c.info)).toBe(true)
+    expect(progress(doc.nodes)).toEqual({ done: 1, total: 2 })
+    expect(doc.nodes[0]!.status).toBe('doing')
+
+    // A roadmap with no markers at all is all work.
+    const plain = parseRoadmap('## Work\n- a\n- b')
+    expect(plain.nodes[0]!.info).toBeUndefined()
+    expect(progress(plain.nodes)).toEqual({ done: 0, total: 2 })
+  })
+
+  test('a done heading with an open item is something to check, not a parse error', () => {
+    const doc = parseRoadmap('### Phase 8 — Chat ✅\n- ✅ a\n- ⬜ Later: more')
+    expect(doc.warnings).toEqual([{ line: 1, message: expect.anything(), kind: 'check' }])
+  })
+
   test('garbage never throws', () => {
     for (const junk of ['', '\n\n', '-', '- ', '[', '#', '####### seven', '- [x', '~~~', '<!--', '* * *', '1.']) {
       expect(() => parseRoadmap(junk)).not.toThrow()
